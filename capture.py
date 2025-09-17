@@ -1,35 +1,34 @@
+import mss
 import numpy as np
-from mss import mss
 
 class Capture:
     """
     The Capture class is responsible for capturing a specified region of the screen.
     """
 
-    def __init__(self, x, y, x_fov, y_fov):
+    def __init__(self):
         """
         Initializes the Capture class with screen capture parameters.
-
-        Args:
-            x (int): X-coordinate for the capture starting point.
-            y (int): Y-coordinate for the capture starting point.
-            x_fov (int): Width of the capture area.
-            y_fov (int): Height of the capture area.
         """
-        self.monitor = {
-            "top": y,
-            "left": x,
-            "width": x_fov,
-            "height": y_fov
-        }
-        
-    def get_screen(self):
+        self.sct = mss.mss()
+    
+    def get_screenshot(self, region):
         """
         Captures the screen based on the specified region and returns it as a numpy array.
+
+        Args:
+            region (tuple): A tuple containing the region coordinates (x, y, width, height).
 
         Returns:
             np.ndarray: The captured screen region as a numpy array.
         """
-        with mss() as sct:
-            screenshot = sct.grab(self.monitor)
-            return np.array(screenshot)
+        monitor = {
+            "top": region[1],
+            "left": region[0], 
+            "width": region[2],
+            "height": region[3]
+        }
+        
+        screenshot = self.sct.grab(monitor)
+        img = np.array(screenshot)
+        return img[:, :, :3]  # Remover canal alpha

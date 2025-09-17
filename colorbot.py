@@ -1,9 +1,9 @@
 import cv2
 import numpy as np
-import win32api
-import random
 import threading
 import time
+import random
+import win32api
 from capture import Capture
 from mouse import Mouse
 from settings import Settings
@@ -15,128 +15,168 @@ class Colorbot:
     the color is within a defined region.
     """
 
-    def __init__(self, x, y, x_fov, y_fov):
+    def __init__(self, capture_region, center_x, center_y):
         """
         Initializes the Colorbot with screen capture parameters.
 
         Args:
-            x (int): X-coordinate for the capture starting point.
-            y (int): Y-coordinate for the capture starting point.
-            x_fov (int): Width of the capture area.
-            y_fov (int): Height of the capture area.
+            capture_region (list): [x, y, width, height] of the capture area.
+            center_x (int): X-coordinate of the screen center.
+            center_y (int): Y-coordinate of the screen center.
         """
-        self.capturer = Capture(x, y, x_fov, y_fov)
+        self.capture = Capture()
         self.mouse = Mouse()
         self.settings = Settings()
-
-        # Color detection settings (HSV)
-        self.lower_color = np.array([150, 76,  123])
-        self.upper_color = np.array([160, 197, 255])
-
-        # Aimbot settings
-        self.aim_enabled = self.settings.get_boolean('Aimbot', 'Enabled')
-        self.aim_key = int(self.settings.get('Aimbot', 'toggleKey'), 16)
-        self.x_speed = self.settings.get_float('Aimbot', 'xSpeed')
-        self.y_speed = self.settings.get_float('Aimbot', 'ySpeed')
-        self.x_fov = self.settings.get_int('Aimbot', 'xFov')
-        self.y_fov = self.settings.get_int('Aimbot', 'yFov')
-        self.target_offset = self.settings.get_float('Aimbot', 'targetOffset')
-
-        # Triggerbot settings
-        self.trigger_enabled = self.settings.get_boolean('Triggerbot', 'Enabled')
-        self.trigger_key = int(self.settings.get('Triggerbot', 'toggleKey'), 16)
-        self.min_delay = self.settings.get_int('Triggerbot', 'minDelay')
-        self.max_delay = self.settings.get_int('Triggerbot', 'maxDelay')
-        self.x_range = self.settings.get_int('Triggerbot', 'xRange')
-        self.y_range = self.settings.get_int('Triggerbot', 'yRange')
-
-        # Precomputed values
-        self.kernel = np.ones((3, 3), np.uint8)
-        self.screen_center = (self.x_fov // 2, self.y_fov // 2)
-
-    def listen_aimbot(self):
-        """
-        Continuously listens for the aimbot key press and processes aiming.
-        """
-        while True:
-            if win32api.GetAsyncKeyState(self.aim_key) < 0:
-                self.process("move")
-            time.sleep(0.01)  # Small sleep to prevent high CPU usage
-
-    def listen_triggerbot(self):
-        """
-        Continuously listens for the triggerbot key press and processes clicking.
-        """
-        while True:
-            if win32api.GetAsyncKeyState(self.trigger_key) < 0:
-                self.process("click")
-            time.sleep(0.01)  # Small sleep to prevent high CPU usage
-
-    def listen(self):
-        """
-        Initializes listeners for both aimbot and triggerbot functionalities.
-        """
-        if self.aim_enabled:
-            threading.Thread(target=self.listen_aimbot).start()
-        if self.trigger_enabled:
-            threading.Thread(target=self.listen_triggerbot).start()
-
-    def process(self, action):
-        """
-        Processes the captured screen to detect the specified color and performs actions based on the detected target.
-
-        Args:
-            action (str): The action to perform, either "move" to move the mouse or "click" to trigger a click.
-        """
-        # Convert the captured screen to HSV color space
-        hsv = cv2.cvtColor(self.capturer.get_screen(), cv2.COLOR_BGR2HSV)
+        self.capture_region = capture_region
+        self.center_x = center_x
+        self.center_y = center_y
         
-        # Create a binary mask where detected colors are white, and everything else is black
-        mask = cv2.inRange(hsv, self.lower_color, self.upper_color)
+        # Estados
+        self.aimbot_enabled = False
+        self.triggerbot_enabled = False
+        self.running = True
         
-        # Dilate the mask to make detected regions more prominent
-        dilated = cv2.dilate(mask, self.kernel, iterations=5)
+    def detect_color(self, frame):
+        """Detecta el color púrpura (enemigos en Valorant)"""
+        # Convertir BGR a HSV
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
-        # Apply thresholding to get a binary image
-        thresh = cv2.threshold(dilated, 60, 255, cv2.THRESH_BINARY)[1]
+        # Rango de color púrpura para enemigos
+        lower_purple = np.array([130, 50, 50])
+        upper_purple = np.array([160, 255, 255])
         
-        # Find contours in the binary image
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Process the detected contours
-        if contours:
-            min_distance = float('inf')
-            closest_center = None
+        # Crear máscara
+        mask = cv2.inRange(hsv, lower_purple, upper_purple)
+        
+        # Encontrar contornos
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        targets = []
+        for contour in contours:
+            if cv2.contourArea(contour) > 10:  # Filtrar contornos pequeños
+                M = cv2.moments(contour)
+                if M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    targets.append((cx, cy))
+        
+        return targets
+    
+    def get_closest_target(self, targets):
+        """Encuentra el objetivo más cercano al centro"""
+        if not targets:
+            return None
             
-            for contour in contours:
-                # Find the contour closest to the center of the screen using moments
-                moments = cv2.moments(contour)
-                if moments['m00'] != 0:  # Avoid division by zero
-                    center = (int(moments['m10'] / moments['m00']), int(moments['m01'] / moments['m00']))
-                    distance = np.sqrt((center[0] - self.screen_center[0]) ** 2 + (center[1] - self.screen_center[1]) ** 2)
-
-                    # Update the closest center if the distance is smaller
-                    if distance < min_distance:
-                        min_distance = distance
-                        closest_center = center
-
-            if closest_center is not None:
-                # Get the coordinates of the closest center and apply target offset
-                cX, cY = closest_center
-                cY -= int(self.target_offset)
-
-                if action == "move":
-                    # Calculate the difference between the center of the screen and the detected target
-                    x_diff = cX - self.screen_center[0]
-                    y_diff = cY - self.screen_center[1]
-
-                    # Move the mouse towards the target
-                    self.mouse.move(self.x_speed * x_diff, self.y_speed * y_diff)
-
-                elif action == "click":
-                    # Check if the detected target is within the trigger range
-                    if (abs(cX - self.screen_center[0]) <= self.x_range and
-                        abs(cY - self.screen_center[1]) <= self.y_range):
-                        # Random delay before triggering a click
-                        time.sleep(random.uniform(self.min_delay / 1000.0, self.max_delay / 1000.0))
+        center_x = self.capture_region[2] // 2
+        center_y = self.capture_region[3] // 2
+        
+        closest = None
+        min_distance = float('inf')
+        
+        for target in targets:
+            distance = ((target[0] - center_x) ** 2 + (target[1] - center_y) ** 2) ** 0.5
+            if distance < min_distance:
+                min_distance = distance
+                closest = target
+                
+        return closest
+    
+    def aimbot_thread(self):
+        """Hilo del aimbot"""
+        while self.running:
+            if self.aimbot_enabled and self.mouse.is_connected():
+                try:
+                    # Capturar pantalla
+                    frame = self.capture.get_screenshot(self.capture_region)
+                    
+                    # Detectar objetivos
+                    targets = self.detect_color(frame)
+                    closest = self.get_closest_target(targets)
+                    
+                    if closest:
+                        # Calcular movimiento necesario
+                        center_x = self.capture_region[2] // 2
+                        center_y = self.capture_region[3] // 2
+                        
+                        dx = closest[0] - center_x
+                        dy = closest[1] - center_y
+                        
+                        # Aplicar velocidad y límites de FOV
+                        if abs(dx) <= self.settings.aimbot_x_fov and abs(dy) <= self.settings.aimbot_y_fov:
+                            move_x = dx * self.settings.aimbot_x_speed
+                            move_y = dy * self.settings.aimbot_y_speed
+                            
+                            # Mover ratón
+                            self.mouse.move(int(move_x), int(move_y))
+                            
+                except Exception as e:
+                    pass
+                    
+            time.sleep(0.01)  # 100 FPS
+    
+    def triggerbot_thread(self):
+        """Hilo del triggerbot"""
+        while self.running:
+            if self.triggerbot_enabled and self.mouse.is_connected():
+                try:
+                    # Capturar región pequeña del centro
+                    small_region = [
+                        self.capture_region[0] + self.capture_region[2]//2 - self.settings.triggerbot_x_range,
+                        self.capture_region[1] + self.capture_region[3]//2 - self.settings.triggerbot_y_range,
+                        self.settings.triggerbot_x_range * 2,
+                        self.settings.triggerbot_y_range * 2
+                    ]
+                    
+                    frame = self.capture.get_screenshot(small_region)
+                    targets = self.detect_color(frame)
+                    
+                    if targets:
+                        # Delay aleatorio
+                        delay = random.randint(self.settings.triggerbot_min_delay, self.settings.triggerbot_max_delay)
+                        time.sleep(delay / 1000.0)
+                        
+                        # Disparar
                         self.mouse.click()
+                        time.sleep(0.1)  # Evitar spam de clics
+                        
+                except Exception as e:
+                    pass
+                    
+            time.sleep(0.01)
+    
+    def check_keys(self):
+        """Verifica el estado de las teclas"""
+        while self.running:
+            try:
+                # Verificar aimbot toggle
+                if self.settings.aimbot_enabled:
+                    aimbot_state = win32api.GetAsyncKeyState(self.settings.aimbot_toggle_key) & 0x8000
+                    self.aimbot_enabled = bool(aimbot_state)
+                
+                # Verificar triggerbot toggle
+                if self.settings.triggerbot_enabled:
+                    triggerbot_state = win32api.GetAsyncKeyState(self.settings.triggerbot_toggle_key) & 0x8000
+                    self.triggerbot_enabled = bool(triggerbot_state)
+                    
+            except Exception as e:
+                pass
+                
+            time.sleep(0.01)
+    
+    def listen(self):
+        """Inicia todos los hilos"""
+        print("Colorbot iniciado sin Arduino!")
+        print(f"Aimbot: {'Habilitado' if self.settings.aimbot_enabled else 'Deshabilitado'}")
+        print(f"Triggerbot: {'Habilitado' if self.settings.triggerbot_enabled else 'Deshabilitado'}")
+        
+        # Iniciar hilos
+        threading.Thread(target=self.aimbot_thread, daemon=True).start()
+        threading.Thread(target=self.triggerbot_thread, daemon=True).start()
+        threading.Thread(target=self.check_keys, daemon=True).start()
+        
+        try:
+            while self.running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nDeteniendo colorbot...")
+            self.running = False

@@ -1,49 +1,44 @@
-import pyautogui
 import os
+import win32api
 from colorbot import Colorbot
-from settings import Settings
 
-class Main:
+def main():
     """
-    The Main class initializes the application, sets up the necessary parameters, 
-    and runs the Colorbot.
+    Función principal que inicializa y ejecuta el colorbot sin Arduino
     """
-
-    def __init__(self):
-        """
-        Initializes the Main class by setting up screen parameters and the Colorbot instance.
-
-        Attributes:
-            settings (Settings): The settings instance for reading configuration files.
-            monitor (tuple): The screen resolution.
-            center_x (int): The center X-coordinate of the screen.
-            center_y (int): The center Y-coordinate of the screen.
-            x_fov (int): The width of the capture area.
-            y_fov (int): The height of the capture area.
-            colorbot (Colorbot): The Colorbot instance for screen capturing and color detection.
-        """
-        self.settings = Settings()
-
-        self.monitor = pyautogui.size()
-        self.center_x, self.center_y = self.monitor.width // 2, self.monitor.height // 2
-        self.x_fov = self.settings.get_int('Aimbot', 'xFov')
-        self.y_fov = self.settings.get_int('Aimbot', 'yFov')
-
-        self.colorbot = Colorbot(
-            self.center_x - self.x_fov // 2, 
-            self.center_y - self.y_fov // 2, 
-            self.x_fov, 
-            self.y_fov
-        )
-
-    def run(self):
-        """
-        Prints the application title and color settings, then starts the Colorbot.
-        """
-        os.system('cls')
-        os.system('title github.com/iamennui/ValorantArduinoColorbot')
-        print('Enemy Outline Color: Purple')
-        self.colorbot.listen()
+    # Limpiar pantalla y establecer título
+    os.system('cls')
+    os.system('title Valorant Colorbot (Sin Arduino)')
+    
+    print("=== Valorant Colorbot (Sin Arduino) ===")
+    print("Enemy Outline Color: Purple")
+    
+    # Obtener resolución de pantalla
+    screen_width = win32api.GetSystemMetrics(0)
+    screen_height = win32api.GetSystemMetrics(1)
+    
+    # Calcular región de captura (centro de pantalla)
+    fov_width = 200
+    fov_height = 150
+    
+    capture_region = [
+        screen_width // 2 - fov_width // 2,
+        screen_height // 2 - fov_height // 2,
+        fov_width,
+        fov_height
+    ]
+    
+    center_x = screen_width // 2
+    center_y = screen_height // 2
+    
+    print(f"Resolución: {screen_width}x{screen_height}")
+    print(f"Región de captura: {capture_region}")
+    print("\nPresiona Ctrl+C para salir")
+    print("-" * 40)
+    
+    # Iniciar colorbot
+    colorbot = Colorbot(capture_region, center_x, center_y)
+    colorbot.listen()
 
 if __name__ == '__main__':
-    Main().run()
+    main()

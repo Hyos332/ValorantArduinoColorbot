@@ -1,6 +1,6 @@
 requests
-pywin32
 opencv-python
-serial-tool 
 pyautogui
 mss
+pywin32
+numpy
